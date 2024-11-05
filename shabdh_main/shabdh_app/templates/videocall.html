@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Video Call with ISL Captions</title>
+    <style>
+      #root {
+        width: 100vw;
+        height: 100vh;
+        position: relative;
+      }
+
+      #captions {
+        position: absolute;
+        bottom: 10px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(0, 0, 0, 0.7);
+        color: white;
+        padding: 10px 20px;
+        border-radius: 8px;
+        font-size: 16px;
+        max-width: 80%;
+        text-align: center;
+        z-index: 10;
+        display: none;
+      }
+
+      #status {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        background: rgba(255, 255, 255, 0.7);
+        color: black;
+        padding: 5px 10px;
+        border-radius: 5px;
+        font-size: 14px;
+        z-index: 10;
+      }
+
+      .button {
+        background-color: #3b82f6;
+        color: white;
+        padding: 10px 20px;
+        border-radius: 5px;
+        text-align: center;
+        display: inline-block;
+        margin: 5px 0;
+        text-decoration: none;
+        transition: background-color 0.3s;
+      }
+
+      .button:hover {
+        background-color: #2563eb;
+      }
+
+      .close-button {
+        background-color: #ef4444;
+      }
+
+      .close-button:hover {
+        background-color: #dc2626;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <!-- Buttons -->
+    <a href="#" class="button absolute top-4 right-4">Join</a>
+    <a
+      href="{% url 'dashboard' %}"
+      class="button close-button absolute top-16 right-4"
+      >Close</a
+    >
+
+    <!-- Captions and Status -->
+    <div id="captions">Captions will appear here...</div>
+    <div id="status">API Status Code: N/A</div>
+
+    <!-- Include Zego and custom scripts -->
+    <script src="https://unpkg.com/@zegocloud/zego-uikit-prebuilt/zego-uikit-prebuilt.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/recorderjs/0.1.0/recorder.js"></script>
+
+    <script>
+      window.onload = function () {
+        let intervalID;
+
+        function getUrlParams(url) {
+          let urlStr = url.split("?")[1];
+          const urlSearchParams = new URLSearchParams(urlStr);
+          const result = Object.fromEntries(urlSearchParams.entries());
+          return result;
+        }
+
+        const roomID =
+          getUrlParams(window.location.href)["roomID"] ||
+          Math.floor(Math.random() * 10000) + "";
+        const userID = Math.floor(Math.random() * 10000) + "";
+        const userName = "{{ name }}";
+        const appID = 147383766;
+        const serverSecret = "a9d5b4e3a3c0aa38c608558cbad55bc7";
+        const kitToken = ZegoUIKitPrebuilt.generateKitTokenForTest(
+          appID,
+          serverSecret,
+          roomID,
+          userID,
+          userName
+        );
+
+        const zp = ZegoUIKitPrebuilt.create(kitToken);
+
+        zp.joinRoom({
+          container: document.querySelector("#root"),
+          sharedLinks: [
+            {
+              name: "Personal link",
+              url:
+                window.location.protocol +
+                "//" +
+                window.location.host +
+                window.location.pathname +
+                "?roomID=" +
+                roomID,
+            },
+          ],
+          scenario: { mode: ZegoUIKitPrebuilt.VideoConference },
+          turnOnMicrophoneWhenJoining: false,
+          turnOnCameraWhenJoining: false,
+          showMyCameraToggleButton: true,
+          showMyMicrophoneToggleButton: true,
+          showAudioVideoSettingsButton: true,
+          showScreenSharingButton: true,
+          showTextChat: true,
+          showUserList: true,
+          maxUsers: 50,
+          layout: "Grid",
+          showLayoutButton: true,
+          onJoinRoom: startFrameCapture, // Start capturing frames when joining the room
+          onLeaveRoom: stopFrameCapture,
+        });
+
+        function startFrameCapture() {
+          const videoElement = document.querySelector("video"); // Grab the video element
+          document.getElementById("captions").style.display = "block"; // Show captions
+
+          intervalID = setInterval(() => {
+            captureFrame(videoElement); // Capture a frame every 3 seconds (adjust as needed)
+          }, 3000);
+        }
+
+        function stopFrameCapture() {
+          clearInterval(intervalID); // Stop frame capture when leaving the room
+          document.getElementById("captions").style.display = "none"; // Hide captions
+        }
+
+        // Function to capture a frame from the video element
+        function captureFrame(videoElement) {
+          const canvas = document.createElement("canvas");
+          canvas.width = videoElement.videoWidth;
+          canvas.height = videoElement.videoHeight;
+          const context = canvas.getContext("2d");
+          context.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+
+          const frameData = canvas.toDataURL(); // Convert the frame to base64
+
+          // Send the frame to the backend
+          sendFrameToBackend(frameData);
+        }
+
+        // Function to send the captured frame to the backend for processing
+        async function sendFrameToBackend(frameData) {
+          try {
+            const response = await fetch("/process_frame/", {
+              method: "POST",
+              headers: { "X-CSRFToken": "{{ csrf_token }}" },
+              body: new URLSearchParams({ frame: frameData }),
+            });
+
+            const result = await response.json();
+
+            if (result.text) {
+              document.getElementById("captions").innerText = result.text; // Display the detected sign text
+            } else if (result.error) {
+              document.getElementById("captions").innerText =
+                "Error: " + result.error;
+            }
+
+            document.getElementById("status").innerText =
+              "API Status Code: " + response.status; // Update status code
+          } catch (error) {
+            document.getElementById("captions").innerText = "Error: " + error;
+          }
+        }
+      };
+    </script>
+  </body>
+</html>
